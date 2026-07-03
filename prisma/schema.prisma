@@ -1,0 +1,167 @@
+// Prisma schema for the DIY Network Express backend.
+// Mirrors the data model used by the NestJS reference server so both can
+// share the same PostgreSQL database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Category {
+  COOKING
+  CRAFTING
+  SEWING
+  CROCHET
+  KNITTING
+  OTHER
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+}
+
+model User {
+  id        String  @id @default(cuid())
+  email     String  @unique
+  username  String  @unique
+  password  String? // null for accounts created via Google
+  googleId  String? @unique
+  avatarUrl String?
+  bio       String?
+
+  emailVerified              Boolean   @default(false)
+  verificationToken          String?   @unique
+  verificationTokenExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  posts            Post[]
+  comments         Comment[]
+  likes            Like[]
+  saves            Save[]
+  sentMessages     Message[]      @relation("sender")
+  receivedMessages Message[]      @relation("receiver")
+  following        Follow[]       @relation("follower")
+  followers        Follow[]       @relation("following")
+  notifications    Notification[] @relation("recipient")
+}
+
+model Post {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  category    Category
+  materials   String[]
+  steps       String[]
+  images      String[]
+  views       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+
+  comments      Comment[]
+  likes         Like[]
+  saves         Save[]
+  notifications Notification[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String
+
+  @@unique([userId, postId])
+}
+
+model Save {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String
+
+  @@unique([userId, postId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  sender   User   @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId String
+
+  receiver   User   @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiverId String
+}
+
+model Follow {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  follower   User   @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followerId String
+
+  following   User   @relation("following", fields: [followingId], references: [id], onDelete: Cascade)
+  followingId String
+
+  @@unique([followerId, followingId])
+}
+
+// One row represents a whole *bucket* of activity of the same kind on the
+// same target (e.g. every like on a post) since it was last read, so the
+// UI can show "Alice and 4 others liked your post" instead of 5 separate
+// notifications.
+model Notification {
+  id       String           @id @default(cuid())
+  type     NotificationType
+  read     Boolean          @default(false)
+  // Users who contributed to this bucket, most recent last.
+  actorIds String[]
+
+  recipient   User   @relation("recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  recipientId String
+
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Access tokens carry a `jti`; logging out records it here until it would
+// have expired anyway, so the auth middleware can reject it despite the
+// token itself still being cryptographically valid.
+model RevokedToken {
+  jti       String   @id
+  expiresAt DateTime
+}
