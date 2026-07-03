@@ -67,6 +67,11 @@ src/
 Base URL: `http://localhost:5000/api/v1`. Protected routes need an
 `Authorization: Bearer <accessToken>` header.
 
+Interactive docs (Swagger UI): **`http://localhost:5000/api/v1/docs`** — log
+in via `POST /auth/login` there, click "Authorize", and paste the
+`accessToken` to try out protected endpoints. The raw OpenAPI document is at
+`/api/v1/docs.json`.
+
 ### Auth
 
 | Method | Path                        | Auth | Description |

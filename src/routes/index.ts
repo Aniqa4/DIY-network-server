@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import swaggerUi from 'swagger-ui-express';
+import openapiDocument from '../docs/openapi';
 import authRoutes from './auth.routes';
 import usersRoutes from './users.routes';
 import postsRoutes from './posts.routes';
@@ -15,6 +17,7 @@ const router = Router();
 router.get('/', (req, res) => {
   res.json({
     name: 'DIY Network API',
+    docs: '/api/v1/docs',
     health: '/api/v1/health',
     resources: [
       '/api/v1/auth',
@@ -33,6 +36,16 @@ router.get('/', (req, res) => {
 router.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+// Interactive API docs (Swagger UI) + the raw OpenAPI document.
+router.get('/docs.json', (req, res) => {
+  res.json(openapiDocument);
+});
+router.use(
+  '/docs',
+  swaggerUi.serve,
+  swaggerUi.setup(openapiDocument, { customSiteTitle: 'DIY Network API Docs' }),
+);
 
 router.use('/auth', authRoutes);
 router.use('/users', usersRoutes);
