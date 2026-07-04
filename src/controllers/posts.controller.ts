@@ -133,7 +133,7 @@ export async function remove(req: Request<{ id: string }>, res: Response) {
   await prisma.post.delete({ where: { id: req.params.id } });
   // Free the post's images from Cloudinary (best-effort).
   await Promise.all(post.images.map((url) => cloudinary.destroyImage(url)));
-  res.status(204).end();
+  res.json({ message: 'Post deleted' });
 }
 
 async function assertOwner(id: string, userId: string) {

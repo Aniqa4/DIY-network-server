@@ -45,5 +45,5 @@ export async function remove(req: Request<{ id: string }>, res: Response) {
     throw ApiError.forbidden('You do not own this comment');
   }
   await prisma.comment.delete({ where: { id: req.params.id } });
-  res.status(204).end();
+  res.json({ message: 'Comment deleted' });
 }

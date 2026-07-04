@@ -49,7 +49,7 @@ export async function markRead(req: Request<{ id: string }>, res: Response) {
     where: { id: req.params.id },
     data: { read: true },
   });
-  res.status(204).end();
+  res.json({ message: 'Marked as read' });
 }
 
 // POST /notifications/read-all
@@ -58,5 +58,5 @@ export async function markAllRead(req: Request, res: Response) {
     where: { recipientId: req.user!.userId, read: false },
     data: { read: true },
   });
-  res.status(204).end();
+  res.json({ message: 'All marked as read' });
 }

@@ -66,7 +66,7 @@ export async function removeMe(req: Request, res: Response) {
   ];
   await Promise.all(urls.map((url) => cloudinary.destroyImage(url)));
 
-  res.status(204).end();
+  res.json({ message: 'Account deleted' });
 }
 
 // POST /users/me/avatar (multipart, field "avatar")

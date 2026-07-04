@@ -156,7 +156,7 @@ export async function logout(req: Request, res: Response) {
   await prisma.revokedToken.create({
     data: { jti, expiresAt: new Date(exp * 1000) },
   });
-  res.status(204).end();
+  res.json({ message: 'Logged out' });
 }
 
 // -- Google OAuth (implemented with plain fetch, no passport) ---------------

@@ -71,7 +71,7 @@ export async function cancelInvite(req: Request<{ id: string }>, res: Response) 
     where: { id: req.params.id },
     data: { status: 'CANCELLED' },
   });
-  res.status(204).end();
+  res.json({ message: 'Invite cancelled' });
 }
 
 // GET /me/invite — the current user's pending staff invite, if any.
@@ -112,7 +112,7 @@ export async function rejectInvite(req: Request, res: Response) {
     where: { id: invite.id },
     data: { status: 'REJECTED' },
   });
-  res.status(204).end();
+  res.json({ message: 'Invite declined' });
 }
 
 // -- member management ------------------------------------------------------
@@ -146,7 +146,7 @@ export async function removeMember(req: Request<{ userId: string }>, res: Respon
     where: { id: req.params.userId },
     data: { role: 'USER' },
   });
-  res.status(204).end();
+  res.json({ message: 'Member removed' });
 }
 
 // -- banning ----------------------------------------------------------------
