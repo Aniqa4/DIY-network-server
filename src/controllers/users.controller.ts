@@ -12,7 +12,7 @@ const PUBLIC_SELECT = {
   _count: { select: { posts: true } },
 } as const;
 
-const ME_SELECT = { ...PUBLIC_SELECT, email: true } as const;
+const ME_SELECT = { ...PUBLIC_SELECT, email: true, role: true } as const;
 
 // GET /users/me
 export async function findMe(req: Request, res: Response) {
@@ -97,14 +97,15 @@ export async function uploadAvatar(req: Request, res: Response) {
   res.json(user);
 }
 
-// GET /users/:id — public profile.
+// GET /users/:id — public profile. Banned profiles are hidden.
 export async function findOne(req: Request<{ id: string }>, res: Response) {
   const user = await prisma.user.findUnique({
     where: { id: req.params.id },
-    select: PUBLIC_SELECT,
+    select: { ...PUBLIC_SELECT, banned: true },
   });
-  if (!user) {
+  if (!user || user.banned) {
     throw ApiError.notFound('User not found');
   }
-  res.json(user);
+  const { banned, ...publicProfile } = user;
+  res.json(publicProfile);
 }

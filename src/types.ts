@@ -1,9 +1,12 @@
-// The JWT payload that requireAuth puts on req.user.
+import type { Role } from '@prisma/client';
+
+// What requireAuth puts on req.user — JWT claims plus the freshly-loaded role.
 export interface AuthPayload {
   userId: string;
   username: string;
   jti: string;
   exp: number;
+  role: Role;
 }
 
 // Make req.user known to Express everywhere (multer already augments

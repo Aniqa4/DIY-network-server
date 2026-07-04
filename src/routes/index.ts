@@ -10,6 +10,8 @@ import savesRoutes from './saves.routes';
 import followsRoutes from './follows.routes';
 import messagesRoutes from './messages.routes';
 import notificationsRoutes from './notifications.routes';
+import reportsRoutes from './reports.routes';
+import adminRoutes from './admin.routes';
 
 const router = Router();
 
@@ -56,5 +58,7 @@ router.use('/saves', savesRoutes);
 router.use('/follows', followsRoutes);
 router.use('/messages', messagesRoutes);
 router.use('/notifications', notificationsRoutes);
+router.use('/reports', reportsRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;

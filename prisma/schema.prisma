@@ -26,6 +26,26 @@ enum NotificationType {
   FOLLOW
 }
 
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+// Lifecycle of an invitation to join the staff (admin/moderator) team.
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
 model User {
   id        String  @id @default(cuid())
   email     String  @unique
@@ -34,6 +54,10 @@ model User {
   googleId  String? @unique
   avatarUrl String?
   bio       String?
+
+  role   Role    @default(USER)
+  // A banned profile is hidden from the public and cannot log in or act.
+  banned Boolean @default(false)
 
   emailVerified              Boolean   @default(false)
   verificationToken          String?   @unique
@@ -50,6 +74,11 @@ model User {
   following        Follow[]       @relation("follower")
   followers        Follow[]       @relation("following")
   notifications    Notification[] @relation("recipient")
+
+  staffInvite    StaffInvite?  @relation("inviteRecipient")
+  sentInvites    StaffInvite[] @relation("inviteSender")
+  reportsMade    Report[]      @relation("reporter")
+  reportsAgainst Report[]      @relation("reportedUser")
 }
 
 model Post {
@@ -61,6 +90,8 @@ model Post {
   steps       String[]
   images      String[]
   views       Int      @default(0)
+  // A banned post is hidden from public listings and detail pages.
+  banned      Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -71,6 +102,7 @@ model Post {
   likes         Like[]
   saves         Save[]
   notifications Notification[]
+  reports       Report[]
 }
 
 model Comment {
@@ -164,4 +196,42 @@ model Notification {
 model RevokedToken {
   jti       String   @id
   expiresAt DateTime
+}
+
+// An offer for a user to join the staff team as MODERATOR or ADMIN. One row
+// per user (reused across re-invites): the admin flips it back to PENDING to
+// invite again after a rejection or cancellation.
+model StaffInvite {
+  id     String       @id @default(cuid())
+  role   Role // the offered role (MODERATOR or ADMIN)
+  status InviteStatus @default(PENDING)
+
+  user   User   @relation("inviteRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique
+
+  invitedBy   User   @relation("inviteSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  invitedById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A user-submitted report against either a post (content) or another user
+// (profile). Exactly one of postId / reportedUserId is set.
+model Report {
+  id     String       @id @default(cuid())
+  reason String
+  status ReportStatus @default(PENDING)
+
+  reporter   User   @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reporterId String
+
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String?
+
+  reportedUser   User?   @relation("reportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  reportedUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

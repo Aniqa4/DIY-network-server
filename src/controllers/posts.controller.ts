@@ -23,6 +23,9 @@ export async function findAll(req: Request, res: Response) {
     where: {
       category: (category as Category) || undefined,
       authorId: authorId || undefined,
+      // Hide banned posts and posts by banned authors from public listings.
+      banned: false,
+      author: { banned: false },
     },
     orderBy: { createdAt: 'desc' },
     include: POST_INCLUDE,
@@ -31,10 +34,11 @@ export async function findAll(req: Request, res: Response) {
 }
 
 // GET /posts/:id — does NOT bump the view count; that's a separate write,
-// see POST /posts/:id/view below.
+// see POST /posts/:id/view below. Banned posts (or posts by a banned author)
+// return 404 to the public.
 export async function findOne(req: Request<{ id: string }>, res: Response) {
-  const post = await prisma.post.findUnique({
-    where: { id: req.params.id },
+  const post = await prisma.post.findFirst({
+    where: { id: req.params.id, banned: false, author: { banned: false } },
     include: POST_INCLUDE,
   });
   if (!post) {

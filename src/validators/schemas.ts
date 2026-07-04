@@ -118,3 +118,41 @@ export const createMessageSchema = z
     content: z.string().min(1),
   })
   .strict();
+
+// -- moderation ------------------------------------------------------------
+
+// A report targets exactly one of a post or a user.
+export const createReportSchema = z
+  .object({
+    postId: z.string().optional(),
+    reportedUserId: z.string().optional(),
+    reason: z.string().min(1).max(500),
+  })
+  .strict()
+  .refine(
+    (data) => Boolean(data.postId) !== Boolean(data.reportedUserId),
+    { message: 'Provide exactly one of postId or reportedUserId' },
+  );
+
+export const resolveReportSchema = z
+  .object({
+    status: z.enum(['RESOLVED', 'DISMISSED']),
+  })
+  .strict();
+
+const STAFF_ROLES = ['MODERATOR', 'ADMIN'] as const;
+
+// Invite a user to the staff team by username.
+export const createInviteSchema = z
+  .object({
+    username: z.string().min(1),
+    role: z.enum(STAFF_ROLES),
+  })
+  .strict();
+
+// Change an existing member's role (USER demotes them off the team).
+export const changeRoleSchema = z
+  .object({
+    role: z.enum(['USER', 'MODERATOR', 'ADMIN']),
+  })
+  .strict();

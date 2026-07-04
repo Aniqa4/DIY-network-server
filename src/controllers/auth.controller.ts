@@ -84,6 +84,10 @@ export async function login(req: Request, res: Response) {
     );
   }
 
+  if (user.banned) {
+    throw ApiError.forbidden('Your account has been suspended.');
+  }
+
   res.json(signToken(user.id, user.username));
 }
 
