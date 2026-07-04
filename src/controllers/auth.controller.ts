@@ -173,54 +173,62 @@ export function googleLogin(req: Request, res: Response) {
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 }
 
-// GET /auth/google/callback — Google redirects back here with ?code=...
+// GET /auth/google/callback — Google redirects the *browser* here with
+// ?code=... . We exchange it for our own JWT, then redirect back to the
+// frontend with the token in the URL so the SPA can store it. On any failure
+// we bounce to the login page with an ?error flag instead of dumping JSON.
 export async function googleCallback(req: Request, res: Response) {
-  const code = req.query.code as string | undefined;
-  if (!code) {
-    throw ApiError.badRequest('Missing authorization code');
-  }
+  try {
+    const code = req.query.code as string | undefined;
+    if (!code) {
+      throw new Error('Missing authorization code');
+    }
 
-  // Exchange the code for an access token.
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: env.google.clientId ?? '',
-      client_secret: env.google.clientSecret ?? '',
-      redirect_uri: env.google.callbackUrl ?? '',
-      grant_type: 'authorization_code',
-    }),
-  });
-  if (!tokenResponse.ok) {
-    throw ApiError.unauthorized('Google token exchange failed');
-  }
-  const { access_token: googleAccessToken } = (await tokenResponse.json()) as {
-    access_token: string;
-  };
+    // Exchange the code for a Google access token.
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: env.google.clientId ?? '',
+        client_secret: env.google.clientSecret ?? '',
+        redirect_uri: env.google.callbackUrl ?? '',
+        grant_type: 'authorization_code',
+      }),
+    });
+    if (!tokenResponse.ok) {
+      throw new Error('Google token exchange failed');
+    }
+    const { access_token: googleAccessToken } =
+      (await tokenResponse.json()) as { access_token: string };
 
-  // Fetch the user's Google profile.
-  const profileResponse = await fetch(
-    'https://www.googleapis.com/oauth2/v2/userinfo',
-    { headers: { Authorization: `Bearer ${googleAccessToken}` } },
-  );
-  if (!profileResponse.ok) {
-    throw ApiError.unauthorized('Could not fetch Google profile');
-  }
-  const profile = (await profileResponse.json()) as {
-    id: string;
-    email?: string;
-  };
-  if (!profile.email) {
-    throw ApiError.badRequest('Google account has no email');
-  }
+    // Fetch the user's Google profile.
+    const profileResponse = await fetch(
+      'https://www.googleapis.com/oauth2/v2/userinfo',
+      { headers: { Authorization: `Bearer ${googleAccessToken}` } },
+    );
+    if (!profileResponse.ok) {
+      throw new Error('Could not fetch Google profile');
+    }
+    const profile = (await profileResponse.json()) as {
+      id: string;
+      email?: string;
+    };
+    if (!profile.email) {
+      throw new Error('Google account has no email');
+    }
 
-  const user = await findOrCreateGoogleUser({
-    googleId: profile.id,
-    email: profile.email,
-  });
+    const user = await findOrCreateGoogleUser({
+      googleId: profile.id,
+      email: profile.email,
+    });
 
-  res.json(signToken(user.id, user.username));
+    const { accessToken } = signToken(user.id, user.username);
+    res.redirect(`${env.clientUrl}/auth/callback?token=${accessToken}`);
+  } catch (error) {
+    console.error('Google OAuth callback failed:', error);
+    res.redirect(`${env.clientUrl}/login?error=google`);
+  }
 }
 
 async function findOrCreateGoogleUser({

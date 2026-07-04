@@ -79,20 +79,56 @@ export async function create(req: Request, res: Response) {
   res.status(201).json(post);
 }
 
-// PATCH /posts/:id
+// PATCH /posts/:id — text fields via JSON or multipart. When `imageOrder` is
+// present the image set is reconciled: entries are kept existing URLs or
+// "__new__<i>" placeholders for newly uploaded files, removed images are
+// deleted from Cloudinary.
 export async function update(req: Request<{ id: string }>, res: Response) {
-  await assertOwner(req.params.id, req.user!.userId);
+  const existing = await assertOwner(req.params.id, req.user!.userId);
+
+  const { imageOrder, ...fields } = req.body as {
+    imageOrder?: string[];
+    [key: string]: unknown;
+  };
+  const data: Record<string, unknown> = { ...fields };
+
+  if (imageOrder !== undefined) {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    const uploaded = await Promise.all(
+      files.map((file) => cloudinary.uploadImage(file, 'posts')),
+    );
+
+    const finalImages: string[] = [];
+    for (const entry of imageOrder) {
+      if (entry.startsWith('__new__')) {
+        const idx = Number(entry.slice('__new__'.length));
+        const url = uploaded[idx]?.secure_url;
+        if (url) finalImages.push(url);
+      } else if (existing.images.includes(entry)) {
+        // Only keep URLs that actually belonged to this post.
+        finalImages.push(entry);
+      }
+    }
+    data.images = finalImages.slice(0, 5);
+
+    // Best-effort cleanup of images the user removed.
+    const removed = existing.images.filter((url) => !finalImages.includes(url));
+    await Promise.all(removed.map((url) => cloudinary.destroyImage(url)));
+  }
+
   const post = await prisma.post.update({
     where: { id: req.params.id },
-    data: req.body,
+    data,
   });
   res.json(post);
 }
 
 // DELETE /posts/:id
 export async function remove(req: Request<{ id: string }>, res: Response) {
-  await assertOwner(req.params.id, req.user!.userId);
+  const post = await assertOwner(req.params.id, req.user!.userId);
   await prisma.post.delete({ where: { id: req.params.id } });
+  // Free the post's images from Cloudinary (best-effort).
+  await Promise.all(post.images.map((url) => cloudinary.destroyImage(url)));
   res.status(204).end();
 }
 
@@ -104,4 +140,5 @@ async function assertOwner(id: string, userId: string) {
   if (post.authorId !== userId) {
     throw ApiError.forbidden('You do not own this post');
   }
+  return post;
 }

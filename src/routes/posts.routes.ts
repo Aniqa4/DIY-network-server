@@ -20,7 +20,16 @@ router.post(
   validate(createPostSchema),
   controller.create,
 );
-router.patch('/:id', requireAuth, validate(updatePostSchema), controller.update);
+// postImages (multer) runs first so multipart edits — which can include new
+// image files — are parsed before validation. JSON-only edits pass straight
+// through multer untouched.
+router.patch(
+  '/:id',
+  requireAuth,
+  postImages,
+  validate(updatePostSchema),
+  controller.update,
+);
 router.delete('/:id', requireAuth, controller.remove);
 
 export default router;

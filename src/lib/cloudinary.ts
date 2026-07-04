@@ -33,3 +33,19 @@ export function uploadImage(
     bufferStream.pipe(uploadStream);
   });
 }
+
+// Deletes an image from Cloudinary given its secure_url. Best-effort — a
+// failure here (e.g. already gone) shouldn't break the request. The public_id
+// is the path after /upload/[vNNN/] minus the extension, e.g.
+// https://res.cloudinary.com/x/image/upload/v1/posts/abc.jpg -> posts/abc
+export async function destroyImage(secureUrl: string): Promise<void> {
+  const match = secureUrl.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/);
+  if (!match) return;
+  try {
+    // invalidate: true also purges the CDN edge cache, so browsers stop
+    // serving the old image after it's removed.
+    await cloudinary.uploader.destroy(match[1], { invalidate: true });
+  } catch (error) {
+    console.error('Failed to delete Cloudinary image:', match[1], error);
+  }
+}

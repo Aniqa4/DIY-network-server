@@ -43,7 +43,29 @@ export async function updateMe(req: Request, res: Response) {
 
 // DELETE /users/me
 export async function removeMe(req: Request, res: Response) {
-  await prisma.user.delete({ where: { id: req.user!.userId } });
+  const userId = req.user!.userId;
+
+  // Gather every image the account owns before the cascade delete wipes the
+  // rows: the avatar plus all images across the user's posts.
+  const [me, posts] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarUrl: true },
+    }),
+    prisma.post.findMany({
+      where: { authorId: userId },
+      select: { images: true },
+    }),
+  ]);
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  const urls = [
+    ...(me?.avatarUrl ? [me.avatarUrl] : []),
+    ...posts.flatMap((post) => post.images),
+  ];
+  await Promise.all(urls.map((url) => cloudinary.destroyImage(url)));
+
   res.status(204).end();
 }
 
@@ -52,12 +74,26 @@ export async function uploadAvatar(req: Request, res: Response) {
   if (!req.file) {
     throw ApiError.badRequest('An "avatar" image file is required');
   }
+
+  // Remember the current avatar so we can delete it once the new one is saved.
+  const before = await prisma.user.findUnique({
+    where: { id: req.user!.userId },
+    select: { avatarUrl: true },
+  });
+
   const result = await cloudinary.uploadImage(req.file, 'avatars');
   const user = await prisma.user.update({
     where: { id: req.user!.userId },
     data: { avatarUrl: result.secure_url },
     select: ME_SELECT,
   });
+
+  // Free the previous avatar (best-effort; skips non-Cloudinary URLs like
+  // Google profile pictures, which destroyImage ignores).
+  if (before?.avatarUrl) {
+    await cloudinary.destroyImage(before.avatarUrl);
+  }
+
   res.json(user);
 }
 

@@ -29,6 +29,9 @@ const env = {
 
   appUrl: process.env.APP_URL || 'http://localhost:5000',
 
+  // The frontend origin — used to redirect back after Google OAuth.
+  clientUrl: process.env.CLIENT_URL || 'http://localhost:3000',
+
   email: {
     host: process.env.EMAIL_HOST,
     port: Number(process.env.EMAIL_PORT) || 587,

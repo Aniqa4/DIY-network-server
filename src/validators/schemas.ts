@@ -63,6 +63,19 @@ export const createPostSchema = z
   })
   .strict();
 
+// Like jsonArray but may be empty — used for imageOrder, where an empty list
+// means "the post now has no images".
+const jsonStringArray = z.preprocess((value) => {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}, z.array(z.string()));
+
 export const updatePostSchema = z
   .object({
     title: z.string().min(1).optional(),
@@ -70,6 +83,9 @@ export const updatePostSchema = z
     category: z.enum(CATEGORIES).optional(),
     materials: jsonArray.optional(),
     steps: jsonArray.optional(),
+    // Desired final image sequence. Each entry is either an existing image
+    // URL (kept) or "__new__<i>" referencing the i-th newly uploaded file.
+    imageOrder: jsonStringArray.optional(),
   })
   .strict();
 
