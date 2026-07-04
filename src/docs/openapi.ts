@@ -50,6 +50,8 @@ const openapiDocument = {
     { name: 'follows' },
     { name: 'messages' },
     { name: 'notifications' },
+    { name: 'reports' },
+    { name: 'admin', description: 'Staff-only: moderation, bans, member management' },
   ],
   components: {
     securitySchemes: {
@@ -125,9 +127,16 @@ const openapiDocument = {
           { $ref: '#/components/schemas/PublicUser' },
           {
             type: 'object',
-            properties: { email: { type: 'string', format: 'email' } },
+            properties: {
+              email: { type: 'string', format: 'email' },
+              role: { $ref: '#/components/schemas/Role' },
+            },
           },
         ],
+      },
+      Role: {
+        type: 'string',
+        enum: ['USER', 'MODERATOR', 'ADMIN'],
       },
       UpdateUserInput: {
         type: 'object',
@@ -228,6 +237,93 @@ const openapiDocument = {
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
+      },
+      StaffMember: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          username: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          avatarUrl: { type: 'string', nullable: true },
+          role: { $ref: '#/components/schemas/Role' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      Invite: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          role: { $ref: '#/components/schemas/Role' },
+          status: {
+            type: 'string',
+            enum: ['PENDING', 'ACCEPTED', 'REJECTED', 'CANCELLED'],
+          },
+          user: { $ref: '#/components/schemas/UserSummary' },
+          invitedBy: { $ref: '#/components/schemas/UserSummary' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      Report: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          reason: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['PENDING', 'RESOLVED', 'DISMISSED'],
+          },
+          reporter: { $ref: '#/components/schemas/UserSummary' },
+          post: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              id: { type: 'string' },
+              title: { type: 'string' },
+              banned: { type: 'boolean' },
+              authorId: { type: 'string' },
+            },
+          },
+          reportedUser: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              id: { type: 'string' },
+              username: { type: 'string' },
+              avatarUrl: { type: 'string', nullable: true },
+              banned: { type: 'boolean' },
+            },
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CreateReportInput: {
+        type: 'object',
+        required: ['reason'],
+        properties: {
+          postId: { type: 'string', description: 'Report a post (content)' },
+          reportedUserId: { type: 'string', description: 'Report a user (profile)' },
+          reason: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+        description: 'Provide exactly one of postId or reportedUserId.',
+      },
+      CreateInviteInput: {
+        type: 'object',
+        required: ['username', 'role'],
+        properties: {
+          username: { type: 'string' },
+          role: { type: 'string', enum: ['MODERATOR', 'ADMIN'] },
+        },
+      },
+      ChangeRoleInput: {
+        type: 'object',
+        required: ['role'],
+        properties: {
+          role: { $ref: '#/components/schemas/Role' },
+        },
+      },
+      BannedState: {
+        type: 'object',
+        properties: { banned: { type: 'boolean' } },
       },
     },
   },
@@ -739,6 +835,227 @@ const openapiDocument = {
         summary: 'Mark all notifications read',
         security: bearerAuth,
         responses: { 204: { description: 'All marked read' } },
+      },
+    },
+
+    // -- reports (any logged-in user) ---------------------------------------
+    '/reports': {
+      post: {
+        tags: ['reports'],
+        summary: 'Report a post or a profile',
+        security: bearerAuth,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('CreateReportInput') } },
+        },
+        responses: {
+          201: jsonResponse('Report submitted', ref('Message_')),
+          400: errorResponse('Must target exactly one of post/profile'),
+          404: errorResponse('Target not found'),
+        },
+      },
+    },
+
+    // -- staff invites, from the invitee's side -----------------------------
+    '/users/me/invite': {
+      get: {
+        tags: ['admin'],
+        summary: "The current user's pending staff invite (or null)",
+        security: bearerAuth,
+        responses: { 200: jsonResponse('Invite or null', ref('Invite')) },
+      },
+    },
+    '/users/me/invite/accept': {
+      post: {
+        tags: ['admin'],
+        summary: 'Accept the pending invite and adopt the offered role',
+        security: bearerAuth,
+        responses: {
+          200: jsonResponse('New role', {
+            type: 'object',
+            properties: { role: ref('Role') },
+          }),
+          404: errorResponse('No pending invite'),
+        },
+      },
+    },
+    '/users/me/invite/reject': {
+      post: {
+        tags: ['admin'],
+        summary: 'Decline the pending invite',
+        security: bearerAuth,
+        responses: {
+          204: { description: 'Declined' },
+          404: errorResponse('No pending invite'),
+        },
+      },
+    },
+
+    // -- admin / moderation (staff only) ------------------------------------
+    '/admin/staff': {
+      get: {
+        tags: ['admin'],
+        summary: 'List the staff team (admins + moderators) — staff',
+        security: bearerAuth,
+        responses: {
+          200: jsonResponse('Staff', arrayOf('StaffMember')),
+          403: errorResponse('Staff only'),
+        },
+      },
+    },
+    '/admin/reports': {
+      get: {
+        tags: ['admin'],
+        summary: 'List reports — staff',
+        security: bearerAuth,
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['PENDING', 'RESOLVED', 'DISMISSED'] },
+          },
+        ],
+        responses: { 200: jsonResponse('Reports', arrayOf('Report')) },
+      },
+    },
+    '/admin/reports/{id}': {
+      patch: {
+        tags: ['admin'],
+        summary: 'Resolve or dismiss a report — staff',
+        security: bearerAuth,
+        parameters: [idParam('id', 'Report id')],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['status'],
+                properties: {
+                  status: { type: 'string', enum: ['RESOLVED', 'DISMISSED'] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: jsonResponse('Updated report', ref('Report')),
+          404: errorResponse('Report not found'),
+        },
+      },
+    },
+    '/admin/posts/{id}/ban': {
+      post: {
+        tags: ['admin'],
+        summary: 'Ban (hide) a post — staff',
+        security: bearerAuth,
+        parameters: [idParam('id', 'Post id')],
+        responses: {
+          200: jsonResponse('New state', ref('BannedState')),
+          404: errorResponse('Post not found'),
+        },
+      },
+    },
+    '/admin/posts/{id}/unban': {
+      post: {
+        tags: ['admin'],
+        summary: 'Unban (restore) a post — staff',
+        security: bearerAuth,
+        parameters: [idParam('id', 'Post id')],
+        responses: {
+          200: jsonResponse('New state', ref('BannedState')),
+          404: errorResponse('Post not found'),
+        },
+      },
+    },
+    '/admin/users/{id}/ban': {
+      post: {
+        tags: ['admin'],
+        summary: 'Ban (suspend) a profile — staff; only admins may ban a moderator',
+        security: bearerAuth,
+        parameters: [idParam('id', 'User id')],
+        responses: {
+          200: jsonResponse('New state', ref('BannedState')),
+          403: errorResponse('Cannot ban that user'),
+          404: errorResponse('User not found'),
+        },
+      },
+    },
+    '/admin/users/{id}/unban': {
+      post: {
+        tags: ['admin'],
+        summary: 'Unban (restore) a profile — staff',
+        security: bearerAuth,
+        parameters: [idParam('id', 'User id')],
+        responses: {
+          200: jsonResponse('New state', ref('BannedState')),
+          404: errorResponse('User not found'),
+        },
+      },
+    },
+    '/admin/invites': {
+      get: {
+        tags: ['admin'],
+        summary: 'List pending invites — admin',
+        security: bearerAuth,
+        responses: { 200: jsonResponse('Invites', arrayOf('Invite')) },
+      },
+      post: {
+        tags: ['admin'],
+        summary: 'Invite a user to the staff team — admin',
+        security: bearerAuth,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('CreateInviteInput') } },
+        },
+        responses: {
+          201: jsonResponse('Invite created', ref('Invite')),
+          404: errorResponse('No user with that username'),
+          409: errorResponse('Already has that role'),
+        },
+      },
+    },
+    '/admin/invites/{id}': {
+      delete: {
+        tags: ['admin'],
+        summary: 'Cancel a pending invite — admin',
+        security: bearerAuth,
+        parameters: [idParam('id', 'Invite id')],
+        responses: {
+          204: { description: 'Cancelled' },
+          404: errorResponse('Invite not found'),
+        },
+      },
+    },
+    '/admin/staff/{userId}/role': {
+      patch: {
+        tags: ['admin'],
+        summary: "Change a member's role — admin",
+        security: bearerAuth,
+        parameters: [idParam('userId', 'User id')],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('ChangeRoleInput') } },
+        },
+        responses: {
+          200: jsonResponse('Updated member', ref('StaffMember')),
+          400: errorResponse('Cannot change your own role'),
+          404: errorResponse('User not found'),
+        },
+      },
+    },
+    '/admin/staff/{userId}': {
+      delete: {
+        tags: ['admin'],
+        summary: 'Remove a member from the team (demote to user) — admin',
+        security: bearerAuth,
+        parameters: [idParam('userId', 'User id')],
+        responses: {
+          204: { description: 'Removed' },
+          400: errorResponse('Cannot remove yourself'),
+          404: errorResponse('User not found'),
+        },
       },
     },
   },

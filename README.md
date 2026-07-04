@@ -18,7 +18,6 @@ Backend for the DIY Network client, built with **TypeScript**, **Express 5**, **
 ## Getting started
 
 ```bash
-cd server
 npm install
 cp .env.example .env        # then fill in the values
 npx prisma migrate dev      # creates/updates the database schema
@@ -32,11 +31,103 @@ npm run build               # compiles src/ → dist/ with tsc
 npm start                   # runs node dist/index.js
 ```
 
-The default `DATABASE_URL` points at the `diy-postgres` Docker container
-(`docker start diy-postgres`), the same database the NestJS server uses.
-
 If SMTP is not configured (`EMAIL_HOST=replace-me`), verification links are
 printed to the server console so you can still verify accounts in development.
+
+## Local database with Docker
+
+For local development, run PostgreSQL in a Docker container so you have a
+throwaway database that's isolated from production. (You can instead point
+`DATABASE_URL` at a cloud database like Neon — see the comment in `.env`.)
+
+Create the container once:
+
+```bash
+docker run --name diy-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=diy_tutorials \
+  -p 5433:5432 \
+  -d postgres:16
+```
+
+Then set `DATABASE_URL` in `.env` to point at it:
+
+```
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/diy_tutorials?schema=public"
+```
+
+Day-to-day:
+
+```bash
+docker start diy-postgres     # start it (after a reboot, etc.)
+docker stop diy-postgres      # stop it
+docker ps                     # confirm it's running (look for 0.0.0.0:5433->5432)
+```
+
+After the container is up for the first time, create the tables:
+
+```bash
+npx prisma migrate deploy     # apply existing migrations
+```
+
+Open a psql shell inside the container if you need to poke at data
+(e.g. to make yourself an admin):
+
+```bash
+docker exec -it diy-postgres psql -U postgres -d diy_tutorials
+# then, at the prompt:
+#   UPDATE "User" SET role = 'ADMIN' WHERE email = 'you@example.com';
+```
+
+## Changing the schema (Prisma migrations)
+
+The database schema lives in [`prisma/schema.prisma`](prisma/schema.prisma).
+Whenever you change a model, create a migration so the change is versioned and
+reproducible on other machines / production.
+
+**During development** — edit `schema.prisma`, then:
+
+```bash
+npx prisma migrate dev --name describe_your_change
+```
+
+This does three things: generates a new SQL migration in `prisma/migrations/`,
+applies it to your dev database, and regenerates the Prisma Client (the typed
+`@prisma/client`). Use a short, descriptive name, e.g.
+`--name add_post_tags`.
+
+**If you only changed generated types** (no schema change) or need to
+regenerate the client manually:
+
+```bash
+npx prisma generate
+```
+
+> If `prisma generate` fails on Windows with an `EPERM ... query_engine`
+> error, the dev server is holding the engine file open — stop `npm run dev`
+> first, then run it again.
+
+**Applying migrations elsewhere** (production, a teammate's machine, CI) —
+never use `migrate dev` there; it can reset data. Use:
+
+```bash
+npx prisma migrate deploy      # applies pending migrations, no prompts
+```
+
+This is exactly what the Docker image runs on boot (`start:prod`), so deploys
+migrate themselves.
+
+**Useful checks:**
+
+```bash
+npx prisma migrate status      # are all migrations applied?
+npx prisma studio              # browse/edit data in a local GUI
+```
+
+> Commit the generated `prisma/migrations/` folder to Git — migrations are
+> part of the source. Never hand-edit an already-applied migration; make a new
+> one instead.
 
 ## Project structure
 
