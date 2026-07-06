@@ -3,34 +3,64 @@ import prisma from '../lib/prisma';
 import * as cloudinary from '../lib/cloudinary';
 import ApiError from '../utils/api-error';
 import { CATEGORIES, type Category } from '../validators/schemas';
+import { parsePageParams, buildPage } from '../lib/pagination';
+import type { Prisma } from '@prisma/client';
 
 const POST_INCLUDE = {
-  author: { select: { id: true, username: true } },
+  author: { select: { id: true, username: true, avatarUrl: true } },
   _count: { select: { likes: true, saves: true, comments: true } },
 } as const;
 
-// GET /posts?category=CROCHET&authorId=xxx (both optional)
+// Maps a ?sort value to a Prisma orderBy. Defaults to newest first.
+function postOrderBy(sort: string | undefined): Prisma.PostOrderByWithRelationInput[] {
+  switch (sort) {
+    case 'oldest':
+      return [{ createdAt: 'asc' }];
+    case 'most_viewed':
+      return [{ views: 'desc' }, { createdAt: 'desc' }];
+    case 'most_liked':
+      return [{ likes: { _count: 'desc' } }, { createdAt: 'desc' }];
+    case 'newest':
+    default:
+      return [{ createdAt: 'desc' }];
+  }
+}
+
+// GET /posts?category=&authorId=&sort=&page=&limit=&startDate=&endDate=
+// Returns a paginated envelope: { items, page, limit, total, totalPages, hasMore }.
 export async function findAll(req: Request, res: Response) {
   const category = req.query.category as string | undefined;
   const authorId = req.query.authorId as string | undefined;
+  const sort = req.query.sort as string | undefined;
 
   if (category && !(CATEGORIES as readonly string[]).includes(category)) {
     throw ApiError.badRequest(
       `category must be one of: ${CATEGORIES.join(', ')}`,
     );
   }
-  const posts = await prisma.post.findMany({
-    where: {
-      category: (category as Category) || undefined,
-      authorId: authorId || undefined,
-      // Hide banned posts and posts by banned authors from public listings.
-      banned: false,
-      author: { banned: false },
-    },
-    orderBy: { createdAt: 'desc' },
-    include: POST_INCLUDE,
-  });
-  res.json(posts);
+
+  const params = parsePageParams(req);
+  const where: Prisma.PostWhereInput = {
+    category: (category as Category) || undefined,
+    authorId: authorId || undefined,
+    // Hide banned posts and posts by banned authors from public listings.
+    banned: false,
+    author: { banned: false },
+    ...(params.createdAt ? { createdAt: params.createdAt } : {}),
+  };
+
+  const [posts, total] = await Promise.all([
+    prisma.post.findMany({
+      where,
+      orderBy: postOrderBy(sort),
+      include: POST_INCLUDE,
+      skip: params.skip,
+      take: params.limit,
+    }),
+    prisma.post.count({ where }),
+  ]);
+
+  res.json(buildPage(posts, total, params));
 }
 
 // GET /posts/:id — does NOT bump the view count; that's a separate write,

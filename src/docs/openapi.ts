@@ -359,28 +359,35 @@ const openapiDocument = {
         },
       },
     },
-    '/auth/verify-email': {
-      get: {
+    '/auth/verify-otp': {
+      post: {
         tags: ['auth'],
-        summary: 'Verify an email address using the emailed token',
-        parameters: [
-          {
-            name: 'token',
-            in: 'query',
-            required: true,
-            schema: { type: 'string' },
+        summary: 'Verify an email with the 6-digit code, returns a token',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'code'],
+                properties: {
+                  email: { type: 'string', format: 'email' },
+                  code: { type: 'string', example: '123456' },
+                },
+              },
+            },
           },
-        ],
+        },
         responses: {
-          200: jsonResponse('Verified', ref('Message_')),
-          400: errorResponse('Invalid or expired verification link'),
+          200: jsonResponse('Verified & logged in', ref('AuthToken')),
+          400: errorResponse('Invalid or expired code'),
         },
       },
     },
     '/auth/resend-verification': {
       post: {
         tags: ['auth'],
-        summary: 'Request a fresh verification email',
+        summary: 'Request a fresh 6-digit verification code',
         requestBody: {
           required: true,
           content: {
@@ -395,6 +402,80 @@ const openapiDocument = {
         },
         responses: {
           200: jsonResponse('Generic acknowledgement', ref('Message_')),
+        },
+      },
+    },
+    '/auth/forgot-password': {
+      post: {
+        tags: ['auth'],
+        summary: 'Email a 6-digit password reset code',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email'],
+                properties: { email: { type: 'string', format: 'email' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: jsonResponse('Generic acknowledgement', ref('Message_')),
+        },
+      },
+    },
+    '/auth/reset-password': {
+      post: {
+        tags: ['auth'],
+        summary: 'Reset password using the emailed code',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'code', 'newPassword'],
+                properties: {
+                  email: { type: 'string', format: 'email' },
+                  code: { type: 'string', example: '123456' },
+                  newPassword: { type: 'string', minLength: 6 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: jsonResponse('Password updated', ref('Message_')),
+          400: errorResponse('Invalid or expired code'),
+        },
+      },
+    },
+    '/auth/change-password': {
+      post: {
+        tags: ['auth'],
+        summary: 'Change password while logged in',
+        security: bearerAuth,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['newPassword'],
+                properties: {
+                  currentPassword: { type: 'string' },
+                  newPassword: { type: 'string', minLength: 6 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: jsonResponse('Password changed', ref('Message_')),
+          400: errorResponse('Current password incorrect'),
+          401: errorResponse('Unauthorized'),
         },
       },
     },

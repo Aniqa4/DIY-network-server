@@ -34,6 +34,39 @@ export const resendVerificationSchema = z
   })
   .strict();
 
+const otpCode = z.string().regex(/^\d{6}$/, 'Code must be 6 digits');
+
+// Verify an email address with the 6-digit code sent on registration/login.
+export const verifyOtpSchema = z
+  .object({
+    email: z.string().email(),
+    code: otpCode,
+  })
+  .strict();
+
+// Request a fresh code (verification or reset). Same shape as resend.
+export const requestOtpSchema = z
+  .object({
+    email: z.string().email(),
+  })
+  .strict();
+
+export const resetPasswordSchema = z
+  .object({
+    email: z.string().email(),
+    code: otpCode,
+    newPassword: z.string().min(6),
+  })
+  .strict();
+
+export const changePasswordSchema = z
+  .object({
+    // Optional for Google-only accounts that have never set a password.
+    currentPassword: z.string().optional(),
+    newPassword: z.string().min(6),
+  })
+  .strict();
+
 // -- posts -----------------------------------------------------------------
 
 // materials/steps arrive as JSON-encoded strings when the request is
@@ -108,6 +141,14 @@ export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export const createCommentSchema = z
   .object({
     postId: z.string(),
+    content: z.string().min(1),
+    // When present, this comment is a reply to another comment on the post.
+    parentId: z.string().optional(),
+  })
+  .strict();
+
+export const updateCommentSchema = z
+  .object({
     content: z.string().min(1),
   })
   .strict();

@@ -26,6 +26,13 @@ enum NotificationType {
   FOLLOW
 }
 
+// Purpose of a one-time password: confirming a new email, or authorising a
+// password reset.
+enum OtpPurpose {
+  VERIFY
+  RESET
+}
+
 enum Role {
   USER
   MODERATOR
@@ -74,6 +81,7 @@ model User {
   following        Follow[]       @relation("follower")
   followers        Follow[]       @relation("following")
   notifications    Notification[] @relation("recipient")
+  emailOtps        EmailOtp[]
 
   staffInvite    StaffInvite?  @relation("inviteRecipient")
   sentInvites    StaffInvite[] @relation("inviteSender")
@@ -109,12 +117,19 @@ model Comment {
   id        String   @id @default(cuid())
   content   String
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
   authorId String
 
   post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
   postId String
+
+  // One level of threading: a reply points at its parent comment. Deleting a
+  // parent cascades to its replies.
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId String?
+  replies  Comment[] @relation("CommentReplies")
 }
 
 model Like {
@@ -188,6 +203,23 @@ model Notification {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// A short-lived 6-digit code emailed to a user to verify their address or
+// authorise a password reset. The code itself is stored hashed. At most one
+// active row per (userId, purpose) — issuing a new code replaces the old.
+model EmailOtp {
+  id        String     @id @default(cuid())
+  purpose   OtpPurpose
+  codeHash  String
+  attempts  Int        @default(0)
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, purpose])
 }
 
 // Access tokens carry a `jti`; logging out records it here until it would

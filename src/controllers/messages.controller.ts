@@ -11,8 +11,8 @@ export async function inbox(req: Request, res: Response) {
     where: { OR: [{ senderId: userId }, { receiverId: userId }] },
     orderBy: { createdAt: 'desc' },
     include: {
-      sender: { select: { id: true, username: true } },
-      receiver: { select: { id: true, username: true } },
+      sender: { select: { id: true, username: true, avatarUrl: true } },
+      receiver: { select: { id: true, username: true, avatarUrl: true } },
     },
   });
 

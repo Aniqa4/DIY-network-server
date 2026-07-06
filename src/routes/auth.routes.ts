@@ -6,17 +6,37 @@ import {
   registerSchema,
   loginSchema,
   resendVerificationSchema,
+  verifyOtpSchema,
+  requestOtpSchema,
+  resetPasswordSchema,
+  changePasswordSchema,
 } from '../validators/schemas';
 
 const router = Router();
 
 router.post('/register', validate(registerSchema), controller.register);
 router.post('/login', validate(loginSchema), controller.login);
-router.get('/verify-email', controller.verifyEmail);
+router.post('/verify-otp', validate(verifyOtpSchema), controller.verifyOtp);
 router.post(
   '/resend-verification',
   validate(resendVerificationSchema),
   controller.resendVerification,
+);
+router.post(
+  '/forgot-password',
+  validate(requestOtpSchema),
+  controller.forgotPassword,
+);
+router.post(
+  '/reset-password',
+  validate(resetPasswordSchema),
+  controller.resetPassword,
+);
+router.post(
+  '/change-password',
+  requireAuth,
+  validate(changePasswordSchema),
+  controller.changePassword,
 );
 router.post('/logout', requireAuth, controller.logout);
 

@@ -1,13 +1,11 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { randomBytes, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma';
 import env from '../config/env';
-import * as email from '../lib/email';
+import { issueOtp, consumeOtp } from '../lib/otp';
 import ApiError from '../utils/api-error';
-
-const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 function signToken(userId: string, username: string) {
   const jti = randomUUID();
@@ -15,16 +13,6 @@ function signToken(userId: string, username: string) {
     expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'],
   });
   return { accessToken };
-}
-
-async function sendVerificationEmailSafe(to: string, token: string) {
-  try {
-    await email.sendVerificationEmail(to, token);
-  } catch (error) {
-    // Don't let a broken SMTP config block signups — the user can always
-    // request a fresh link via /auth/resend-verification.
-    console.error('Failed to send verification email:', error);
-  }
 }
 
 // POST /auth/register
@@ -39,25 +27,20 @@ export async function register(req: Request, res: Response) {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const verificationToken = randomBytes(32).toString('hex');
 
   const user = await prisma.user.create({
     data: {
       email: userEmail,
       username,
       password: hashedPassword,
-      verificationToken,
-      verificationTokenExpiresAt: new Date(
-        Date.now() + VERIFICATION_TOKEN_TTL_MS,
-      ),
     },
   });
 
-  await sendVerificationEmailSafe(user.email, verificationToken);
+  await issueOtp(user, 'VERIFY');
 
   res.status(201).json({
     message:
-      'Registration successful. Check your email to verify your account before logging in.',
+      'Registration successful. We emailed a 6-digit code to verify your account.',
   });
 }
 
@@ -78,76 +61,124 @@ export async function login(req: Request, res: Response) {
     throw ApiError.unauthorized('Invalid credentials');
   }
 
-  if (!user.emailVerified) {
-    throw ApiError.forbidden(
-      'Please verify your email before logging in. Check your inbox, or request a new link from /auth/resend-verification.',
-    );
-  }
-
   if (user.banned) {
     throw ApiError.forbidden('Your account has been suspended.');
+  }
+
+  if (!user.emailVerified) {
+    // Auto-send a fresh code and signal the client to route to the OTP screen.
+    await issueOtp(user, 'VERIFY');
+    res.status(403).json({
+      message: 'Email not verified. We emailed you a new 6-digit code.',
+      code: 'EMAIL_NOT_VERIFIED',
+    });
+    return;
   }
 
   res.json(signToken(user.id, user.username));
 }
 
-// GET /auth/verify-email?token=...
-export async function verifyEmail(req: Request, res: Response) {
-  const token = req.query.token as string | undefined;
-  const user = token
-    ? await prisma.user.findUnique({ where: { verificationToken: token } })
-    : null;
-  if (!user || !user.verificationTokenExpiresAt) {
-    throw ApiError.badRequest('Invalid or expired verification link');
-  }
-  if (user.verificationTokenExpiresAt < new Date()) {
-    throw ApiError.badRequest(
-      'Verification link has expired. Request a new one from /auth/resend-verification.',
-    );
+// POST /auth/verify-otp — confirm an email with the 6-digit code, then log in.
+export async function verifyOtp(req: Request, res: Response) {
+  const { email: userEmail, code } = req.body;
+  const user = await prisma.user.findUnique({ where: { email: userEmail } });
+  if (!user) {
+    throw ApiError.badRequest('No active code — request a new one.');
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      emailVerified: true,
-      verificationToken: null,
-      verificationTokenExpiresAt: null,
-    },
-  });
+  await consumeOtp(user.id, 'VERIFY', code);
 
-  res.json({ message: 'Email verified — you can now log in.' });
+  if (!user.emailVerified) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerified: true },
+    });
+  }
+
+  res.json(signToken(user.id, user.username));
 }
 
-// POST /auth/resend-verification
+// POST /auth/resend-verification — reissue a verification code. Generic
+// response so it can't be used to probe which emails are registered.
 export async function resendVerification(req: Request, res: Response) {
   const user = await prisma.user.findUnique({
     where: { email: req.body.email },
   });
-  // Always respond the same way whether or not the account exists, so this
-  // endpoint can't be used to test which emails are registered.
   const genericResponse = {
     message:
-      'If an account with that email exists and is unverified, a new verification link has been sent.',
+      'If an account with that email exists and is unverified, a new code has been sent.',
   };
 
-  if (!user || user.emailVerified) {
-    res.json(genericResponse);
-    return;
+  if (user && !user.emailVerified) {
+    await issueOtp(user, 'VERIFY');
+  }
+  res.json(genericResponse);
+}
+
+// POST /auth/forgot-password — email a reset code. Generic response to avoid
+// email enumeration.
+export async function forgotPassword(req: Request, res: Response) {
+  const user = await prisma.user.findUnique({
+    where: { email: req.body.email },
+  });
+  // Google-only accounts (no password) can't reset — skip silently.
+  if (user && user.password) {
+    await issueOtp(user, 'RESET');
+  }
+  res.json({
+    message:
+      'If an account with that email exists, a password reset code has been sent.',
+  });
+}
+
+// POST /auth/reset-password — verify the reset code and set a new password.
+export async function resetPassword(req: Request, res: Response) {
+  const { email: userEmail, code, newPassword } = req.body;
+  const user = await prisma.user.findUnique({ where: { email: userEmail } });
+  if (!user) {
+    throw ApiError.badRequest('No active code — request a new one.');
   }
 
-  const verificationToken = randomBytes(32).toString('hex');
+  await consumeOtp(user.id, 'RESET', code);
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({
     where: { id: user.id },
-    data: {
-      verificationToken,
-      verificationTokenExpiresAt: new Date(
-        Date.now() + VERIFICATION_TOKEN_TTL_MS,
-      ),
-    },
+    data: { password: hashedPassword },
   });
-  await sendVerificationEmailSafe(user.email, verificationToken);
 
-  res.json(genericResponse);
+  res.json({ message: 'Password updated — you can now log in.' });
+}
+
+// POST /auth/change-password — authenticated password change. Users who
+// already have a password must supply the current one; Google-only accounts
+// setting a password for the first time may omit it.
+export async function changePassword(req: Request, res: Response) {
+  const { currentPassword, newPassword } = req.body;
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.userId },
+  });
+  if (!user) {
+    throw ApiError.unauthorized();
+  }
+
+  if (user.password) {
+    if (!currentPassword) {
+      throw ApiError.badRequest('Current password is required.');
+    }
+    const matches = await bcrypt.compare(currentPassword, user.password);
+    if (!matches) {
+      throw ApiError.badRequest('Current password is incorrect.');
+    }
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword },
+  });
+
+  res.json({ message: 'Password changed.' });
 }
 
 // POST /auth/logout — records the token's jti so it is rejected from now on.
